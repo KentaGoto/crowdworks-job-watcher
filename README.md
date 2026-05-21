@@ -26,6 +26,7 @@ or email.
 | --- | --- | --- |
 | `SPREADSHEET_ID` | Yes | `1abc...xyz` |
 | `SEARCH_URLS` | Yes | `["https://crowdworks.jp/public/jobs/search?search%5Bkeywords%5D=GAS"]` |
+| `SEARCH_MAX_PAGES` | No | `3` |
 | `KEYWORDS` | No | `["GAS","Google Apps Script","スプレッドシート","API連携","ChatGPT","Gemini"]` |
 | `CHAT_WEBHOOK_URL` | No | `https://chat.googleapis.com/...` |
 | `NOTIFY_EMAIL` | No | `you@example.com` |
@@ -50,4 +51,5 @@ The script creates a `jobs` sheet with these columns:
 
 This tool is intentionally conservative. It checks search result pages on a
 3-hour interval and fetches detail pages only for URLs that have not been seen
-before.
+before. Pagination is disabled by default beyond page 1. Set
+`SEARCH_MAX_PAGES` when you want to scan deeper result pages.

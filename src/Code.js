@@ -42,6 +42,7 @@ function checkNewJobs() {
   Logger.log(`Checking ${searchUrls.length} search URL(s).`);
 
   const keywords = readJsonProperty_(props, 'KEYWORDS', CONFIG.defaultKeywords);
+  const maxPages = readNumberProperty_(props, 'SEARCH_MAX_PAGES', 1);
   const sheet = getJobsSheet_();
   ensureHeader_(sheet);
 
@@ -50,47 +51,52 @@ function checkNewJobs() {
   const now = new Date();
 
   searchUrls.forEach((sourceUrl) => {
-    const html = fetchText_(sourceUrl);
-    const candidates = extractJobCandidates_(html, sourceUrl);
-    Logger.log(`${sourceUrl}: found ${candidates.length} candidate URL(s).`);
+    for (let page = 1; page <= maxPages; page += 1) {
+      const pageUrl = buildPageUrl_(sourceUrl, page);
+      const html = fetchText_(pageUrl);
+      const candidates = extractJobCandidates_(html, pageUrl);
+      Logger.log(`${pageUrl}: found ${candidates.length} candidate URL(s).`);
 
-    candidates.forEach((candidate) => {
-      if (knownUrls.has(candidate.url)) {
-        Logger.log(`Already seen: ${candidate.url}`);
-        return;
-      }
+      if (!candidates.length) break;
 
-      const detailHtml = fetchText_(candidate.url);
-      const title = extractTitle_(detailHtml) || candidate.title || candidate.url;
-      const text = htmlToText_(detailHtml);
-      const matchedKeywords = matchKeywords_(`${title}\n${text}`, keywords);
-      const status = matchedKeywords.length ? 'matched' : 'seen';
+      candidates.forEach((candidate) => {
+        if (knownUrls.has(candidate.url)) {
+          Logger.log(`Already seen: ${candidate.url}`);
+          return;
+        }
 
-      const row = [
-        now,
-        matchedKeywords.length ? now : '',
-        status,
-        title,
-        candidate.url,
-        matchedKeywords.join(', '),
-        sourceUrl,
-        makeSnippet_(text),
-      ];
+        const detailHtml = fetchText_(candidate.url);
+        const title = extractTitle_(detailHtml) || candidate.title || candidate.url;
+        const text = htmlToText_(detailHtml);
+        const matchedKeywords = matchKeywords_(`${title}\n${text}`, keywords);
+        const status = matchedKeywords.length ? 'matched' : 'seen';
 
-      sheet.appendRow(row);
-      knownUrls.add(candidate.url);
-
-      if (matchedKeywords.length) {
-        newMatches.push({
+        const row = [
+          now,
+          matchedKeywords.length ? now : '',
+          status,
           title,
-          url: candidate.url,
-          matchedKeywords,
-          snippet: makeSnippet_(text),
-        });
-      }
+          candidate.url,
+          matchedKeywords.join(', '),
+          pageUrl,
+          makeSnippet_(candidate.snippet || text),
+        ];
 
-      Utilities.sleep(1200);
-    });
+        sheet.appendRow(row);
+        knownUrls.add(candidate.url);
+
+        if (matchedKeywords.length) {
+          newMatches.push({
+            title,
+            url: candidate.url,
+            matchedKeywords,
+            snippet: makeSnippet_(candidate.snippet || text),
+          });
+        }
+
+        Utilities.sleep(1200);
+      });
+    }
   });
 
   Logger.log(`Matched ${newMatches.length} new job(s).`);
@@ -138,6 +144,33 @@ function readJsonProperty_(props, key, fallback) {
   } catch (error) {
     throw new Error(`Script Property ${key} must be valid JSON: ${error.message}`);
   }
+}
+
+function readNumberProperty_(props, key, fallback) {
+  const value = props.getProperty(key);
+  if (!value) return fallback;
+
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 1) {
+    throw new Error(`Script Property ${key} must be a positive number.`);
+  }
+
+  return Math.floor(number);
+}
+
+function buildPageUrl_(url, page) {
+  const hashIndex = url.indexOf('#');
+  const withoutHash = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
+  const hash = hashIndex >= 0 ? url.slice(hashIndex) : '';
+  const cleaned = withoutHash
+    .replace(/([?&])page=\d+(&?)/, (match, prefix, suffix) => (suffix ? prefix : ''))
+    .replace(/[?&]$/, '');
+
+  return `${cleaned}${separatorForUrl_(cleaned)}page=${page}${hash}`;
+}
+
+function separatorForUrl_(url) {
+  return url.includes('?') ? '&' : '?';
 }
 
 function fetchText_(url) {
