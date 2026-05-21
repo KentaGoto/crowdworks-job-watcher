@@ -39,6 +39,8 @@ function checkNewJobs() {
     throw new Error('Script Property SEARCH_URLS is required.');
   }
 
+  Logger.log(`Checking ${searchUrls.length} search URL(s).`);
+
   const keywords = readJsonProperty_(props, 'KEYWORDS', CONFIG.defaultKeywords);
   const sheet = getJobsSheet_();
   ensureHeader_(sheet);
@@ -50,9 +52,13 @@ function checkNewJobs() {
   searchUrls.forEach((sourceUrl) => {
     const html = fetchText_(sourceUrl);
     const candidates = extractJobCandidates_(html, sourceUrl);
+    Logger.log(`${sourceUrl}: found ${candidates.length} candidate URL(s).`);
 
     candidates.forEach((candidate) => {
-      if (knownUrls.has(candidate.url)) return;
+      if (knownUrls.has(candidate.url)) {
+        Logger.log(`Already seen: ${candidate.url}`);
+        return;
+      }
 
       const detailHtml = fetchText_(candidate.url);
       const title = extractTitle_(detailHtml) || candidate.title || candidate.url;
@@ -86,6 +92,8 @@ function checkNewJobs() {
       Utilities.sleep(1200);
     });
   });
+
+  Logger.log(`Matched ${newMatches.length} new job(s).`);
 
   if (newMatches.length) {
     notify_(newMatches);
@@ -155,12 +163,21 @@ function extractJobCandidates_(html, sourceUrl) {
   const linkPattern = /<a\b[^>]*href=["']([^"']*\/public\/jobs\/\d+[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let match;
 
-  while ((match = linkPattern.exec(html)) !== null) {
-    const url = normalizeUrl_(match[1], base);
-    const title = htmlToText_(match[2]);
+  const addCandidate = (href, title) => {
+    const url = normalizeUrl_(href, base);
     if (url) {
-      candidates.set(url, { url, title });
+      candidates.set(url, { url, title: title || '' });
     }
+  };
+
+  while ((match = linkPattern.exec(html)) !== null) {
+    const title = htmlToText_(match[2]);
+    addCandidate(match[1], title);
+  }
+
+  const hrefPattern = /href=["']([^"']*\/public\/jobs\/\d+[^"']*)["']/gi;
+  while ((match = hrefPattern.exec(html)) !== null) {
+    addCandidate(match[1], '');
   }
 
   return Array.from(candidates.values());
