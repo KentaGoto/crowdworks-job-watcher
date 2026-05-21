@@ -8,6 +8,7 @@ or email.
 
 - Fetches configured CrowdWorks search URLs
 - Extracts newly seen job URLs from search result pages
+- Skips jobs whose application deadline has already passed
 - Opens only new candidate detail pages
 - Matches jobs by keywords such as GAS, Google Apps Script, spreadsheets, APIs,
   ChatGPT, and Gemini

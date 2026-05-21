@@ -60,6 +60,11 @@ function checkNewJobs() {
       if (!candidates.length) break;
 
       candidates.forEach((candidate) => {
+        if (isExpired_(candidate.expiredOn, now)) {
+          Logger.log(`Expired: ${candidate.url}`);
+          return;
+        }
+
         if (knownUrls.has(candidate.url)) {
           Logger.log(`Already seen: ${candidate.url}`);
           return;
@@ -237,11 +242,23 @@ function extractEmbeddedJobCandidates_(html, base) {
         url: `${base}/public/jobs/${job.id}`,
         title: job.title || '',
         snippet: job.description_digest || '',
+        expiredOn: job.expired_on || '',
       }));
   } catch (error) {
     Logger.log(`Failed to parse embedded job data: ${error.message}`);
     return [];
   }
+}
+
+function isExpired_(expiredOn, now) {
+  if (!expiredOn) return false;
+
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const parts = String(expiredOn).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!parts) return false;
+
+  const expiredDate = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
+  return expiredDate < today;
 }
 
 function normalizeUrl_(href, base) {
