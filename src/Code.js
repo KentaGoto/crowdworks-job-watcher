@@ -21,16 +21,20 @@ const HEADERS = [
   'snippet',
 ];
 
+// 初回セットアップ用。保存先シートを用意し、ヘッダー行をそろえる。
 function setup() {
   const sheet = getJobsSheet_();
   ensureHeader_(sheet);
 }
 
+// Apps Scriptの時間主導型トリガーを作成する。
+// 同じトリガーが増え続けないよう、既存のcheckNewJobsトリガーを消してから作り直す。
 function installTimeTrigger() {
   deleteTriggers_('checkNewJobs');
   ScriptApp.newTrigger('checkNewJobs').timeBased().everyHours(4).create();
 }
 
+// メイン処理。検索ページを確認し、未保存かつ期限内の案件だけをシートへ追加する。
 function checkNewJobs() {
   const props = PropertiesService.getScriptProperties();
   const searchUrls = readJsonProperty_(props, 'SEARCH_URLS', []);
@@ -51,6 +55,7 @@ function checkNewJobs() {
   const now = new Date();
 
   searchUrls.forEach((sourceUrl) => {
+    // CrowdWorksの検索結果は1ページ50件なので、必要なページ数だけ順番に確認する。
     for (let page = 1; page <= maxPages; page += 1) {
       const pageUrl = buildPageUrl_(sourceUrl, page);
       const html = fetchText_(pageUrl);
@@ -70,6 +75,7 @@ function checkNewJobs() {
           return;
         }
 
+        // 検索結果の情報だけでは本文が足りないため、新規候補だけ詳細ページを取得する。
         const detailHtml = fetchText_(candidate.url);
         const title = extractTitle_(detailHtml) || candidate.title || candidate.url;
         const text = htmlToText_(detailHtml);
@@ -99,6 +105,7 @@ function checkNewJobs() {
           });
         }
 
+        // 連続アクセスになりすぎないよう、詳細ページ取得の間に少し待つ。
         Utilities.sleep(1200);
       });
     }
@@ -111,6 +118,7 @@ function checkNewJobs() {
   }
 }
 
+// SPREADSHEET_IDで指定されたスプレッドシートから、保存用のjobsシートを取得する。
 function getJobsSheet_() {
   const spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
   if (!spreadsheetId) {
@@ -121,6 +129,8 @@ function getJobsSheet_() {
   return spreadsheet.getSheetByName(CONFIG.sheetName) || spreadsheet.insertSheet(CONFIG.sheetName);
 }
 
+// 期待するヘッダーでなければシートを初期化する。
+// 手で列名を壊した場合もsetup()で戻せるようにしている。
 function ensureHeader_(sheet) {
   const firstRow = sheet.getRange(1, 1, 1, HEADERS.length).getValues()[0];
   const hasHeader = HEADERS.every((header, index) => firstRow[index] === header);
@@ -132,6 +142,7 @@ function ensureHeader_(sheet) {
   }
 }
 
+// 既に保存済みのURLをSetにして、同じ案件を二重登録しないようにする。
 function loadKnownUrls_(sheet) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return new Set();
@@ -140,6 +151,8 @@ function loadKnownUrls_(sheet) {
   return new Set(urls.filter(Boolean));
 }
 
+// スクリプトプロパティにJSONとして保存した値を読む。
+// SEARCH_URLSやKEYWORDSのように、配列で持ちたい設定に使う。
 function readJsonProperty_(props, key, fallback) {
   const value = props.getProperty(key);
   if (!value) return fallback;
@@ -151,6 +164,7 @@ function readJsonProperty_(props, key, fallback) {
   }
 }
 
+// SEARCH_MAX_PAGESのような数値設定を読む。
 function readNumberProperty_(props, key, fallback) {
   const value = props.getProperty(key);
   if (!value) return fallback;
@@ -163,6 +177,7 @@ function readNumberProperty_(props, key, fallback) {
   return Math.floor(number);
 }
 
+// 検索URLにpageパラメータを付ける。既にpageが付いている場合は置き換える。
 function buildPageUrl_(url, page) {
   const hashIndex = url.indexOf('#');
   const withoutHash = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
@@ -178,6 +193,7 @@ function separatorForUrl_(url) {
   return url.includes('?') ? '&' : '?';
 }
 
+// UrlFetchAppでHTMLを取得する。HTTPエラーは見逃さず例外にする。
 function fetchText_(url) {
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
@@ -195,6 +211,8 @@ function fetchText_(url) {
   return response.getContentText('UTF-8');
 }
 
+// 検索結果ページから案件候補を取り出す。
+// CrowdWorksは案件一覧をHTMLのdata属性に埋め込むため、まずそこを優先して読む。
 function extractJobCandidates_(html, sourceUrl) {
   const base = sourceUrl.match(/^https?:\/\/[^/]+/)[0];
   const candidates = new Map();
@@ -226,6 +244,8 @@ function extractJobCandidates_(html, sourceUrl) {
   return Array.from(candidates.values());
 }
 
+// CrowdWorksのVue初期データから案件一覧を取り出す。
+// ここで期限日も拾っておくと、期限切れ案件は詳細ページ取得前に除外できる。
 function extractEmbeddedJobCandidates_(html, base) {
   const match = html.match(/<div\b[^>]*id=["']vue-container["'][^>]*data=["']([^"']+)["']/i);
   if (!match) return [];
@@ -250,6 +270,7 @@ function extractEmbeddedJobCandidates_(html, base) {
   }
 }
 
+// 応募期限が昨日以前なら期限切れとして扱う。今日が期限の案件はまだ対象に残す。
 function isExpired_(expiredOn, now) {
   if (!expiredOn) return false;
 
@@ -261,6 +282,7 @@ function isExpired_(expiredOn, now) {
   return expiredDate < today;
 }
 
+// 相対URLを絶対URLに直し、クエリ文字列やアンカーを落として同一案件を判定しやすくする。
 function normalizeUrl_(href, base) {
   if (!href) return '';
   const cleanHref = href.replace(/&amp;/g, '&').split('#')[0];
@@ -268,6 +290,7 @@ function normalizeUrl_(href, base) {
   return url.split('?')[0];
 }
 
+// 詳細ページのタイトルをmetaタグまたはtitleタグから取り出す。
 function extractTitle_(html) {
   const ogTitle = html.match(/<meta\b[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["'][^>]*>/i);
   if (ogTitle) return decodeHtml_(ogTitle[1]).trim();
@@ -276,6 +299,7 @@ function extractTitle_(html) {
   return title ? htmlToText_(title[1]).trim() : '';
 }
 
+// HTMLタグや余分な空白を取り除き、キーワード判定しやすいテキストにする。
 function htmlToText_(html) {
   return decodeHtml_(
     html
@@ -286,6 +310,8 @@ function htmlToText_(html) {
   ).trim();
 }
 
+// HTMLエンティティを最低限デコードする。
+// vue-containerのdata属性やタイトル文字列をJSON/テキストとして扱うために必要。
 function decodeHtml_(text) {
   const entities = {
     amp: '&',
@@ -301,15 +327,18 @@ function decodeHtml_(text) {
     .replace(/&([a-z]+);/gi, (_, name) => entities[name] || `&${name};`);
 }
 
+// 大文字小文字を無視して、本文に含まれるキーワードだけを返す。
 function matchKeywords_(text, keywords) {
   const normalizedText = text.toLowerCase();
   return keywords.filter((keyword) => normalizedText.includes(String(keyword).toLowerCase()));
 }
 
+// 通知やシート表示で長くなりすぎないよう、本文を短く丸める。
 function makeSnippet_(text) {
   return text.replace(/\s+/g, ' ').slice(0, 240);
 }
 
+// Google Chatまたはメールへ通知する。設定がない通知先は何もしない。
 function notify_(matches) {
   const props = PropertiesService.getScriptProperties();
   const message = buildNotificationMessage_(matches);
@@ -330,6 +359,7 @@ function notify_(matches) {
   }
 }
 
+// 通知本文を作る。通知が長くなりすぎないよう、最大10件に絞る。
 function buildNotificationMessage_(matches) {
   const lines = [`CrowdWorksで新着候補が${matches.length}件見つかりました。`];
 
@@ -344,6 +374,7 @@ function buildNotificationMessage_(matches) {
   return lines.join('\n');
 }
 
+// 指定した関数名のトリガーを削除する。
 function deleteTriggers_(handlerName) {
   ScriptApp.getProjectTriggers()
     .filter((trigger) => trigger.getHandlerFunction() === handlerName)
